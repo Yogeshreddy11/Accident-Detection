@@ -1,0 +1,88 @@
+import cv2
+import skimage.transform
+from keras.preprocessing import image
+import numpy as np
+import winsound
+import threading
+from keras.models import model_from_json
+from threading import Thread
+import sendGmail
+import datetime
+
+# Function to play the beep sound
+def play_beep():
+    winsound.Beep(1000, 500)  # Adjust frequency and duration as needed
+
+def predict_accident_video(video_path):
+    video_capture = cv2.VideoCapture(video_path)
+    consecutive_accidents = 0
+
+    while video_capture.isOpened():
+        ret, frame = video_capture.read()
+        if not ret:
+            break
+
+        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        resized_frame = skimage.transform.resize(gray_frame, (128, 128, 3))
+        frame_array = image.img_to_array(resized_frame)
+        expanded_frame = np.expand_dims(frame_array, axis=0)
+
+        predictions = model.predict(expanded_frame, batch_size=None, verbose=1)
+        label = np.argmax(predictions, axis=-1)
+        confidence_percentage = np.max(predictions) * 100
+
+        if label == 1:
+            consecutive_accidents = 0
+            cv2.putText(frame, "No Accident", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 3, cv2.LINE_AA)
+        else:
+            consecutive_accidents += 1
+            cv2.putText(frame, "Accident", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 3, cv2.LINE_AA)
+            threading.Thread(target=play_beep).start()  # Play the beep sound in a separate thread
+
+        small_frame = cv2.resize(frame, (640, 360))
+
+        cv2.imshow('Video Frame', small_frame)
+
+        ct = datetime.datetime.now()
+
+        if consecutive_accidents >= 13:
+            consecutive_accidents = 0
+            cv2.imwrite("output/acci"+str(ct).split(" ")[0]+".jpeg", frame)
+            Thread(target=sendGmail.sendAlertMail, args=("output/acci"+str(ct).split(" ")[0]+".jpeg",)).start()
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+        
+
+    video_capture.release()
+    cv2.destroyAllWindows()
+    print("Video processing complete.")
+
+def predict_accident_image(image_path):
+    frame = cv2.imread(image_path)
+
+    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    resized_frame = skimage.transform.resize(gray_frame, (128, 128, 3))
+    frame_array = image.img_to_array(resized_frame)
+    expanded_frame = np.expand_dims(frame_array, axis=0)
+
+    predictions = model.predict(expanded_frame, batch_size=None, verbose=1)
+    label = np.argmax(predictions, axis=-1)
+    confidence_percentage = np.max(predictions) * 100
+
+    if label == 1:
+        cv2.putText(frame, "No Accident", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 3, cv2.LINE_AA)
+    else:
+        cv2.putText(frame, "Accident", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 3, cv2.LINE_AA)
+
+    cv2.imshow('Image Frame', frame)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+    print("Image processing complete.")
+
+
+json_file = open(r"model/cnn_model.json", 'r')
+loaded_model_json = json_file.read()
+json_file.close()
+model = model_from_json(loaded_model_json)
+model.load_weights(r"model/cnn_model_weights.h5")
